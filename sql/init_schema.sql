@@ -18,8 +18,8 @@ CREATE TABLE IF NOT EXISTS poc_bl.projet_livraison.suivi_bl (
   id_bl          STRING    NOT NULL COMMENT 'Clé primaire (UUID généré par l''app)',
   numero_bl      STRING    NOT NULL COMMENT 'Numéro écrit sur le document (unique, suffixé -1/-2/... si doublon)',
   date_reception DATE               COMMENT 'Date de livraison effective',
-  num_article    STRING             COMMENT 'P-00xxxxxx, lié à base_article.item',
   nom_fournisseur STRING            COMMENT 'Fournisseur, lié à base_frs.name',
+  quai_reception STRING             COMMENT 'Quai de réception : B15, B06EST, B06NORD, B02NORD ou AUTRE',
   statut_bl      STRING             COMMENT '1 = OK, 0 = EDI NOK',
   comment_bl     STRING             COMMENT 'Commentaire libre',
   saisie_par     STRING             COMMENT 'Utilisateur créateur (SSO)',
@@ -50,15 +50,16 @@ CREATE TABLE IF NOT EXISTS poc_bl.projet_livraison.pieces_jointes_bl (
 COMMENT 'Pages scannées des BL';
 
 -- ----------------------------------------------------------------------------
--- Table 3 : base_article — référentiel articles -> fournisseurs connus
--- Une ligne par couple (article, fournisseur) : un article peut avoir
--- plusieurs fournisseurs connus.
+-- Table 3 : base_desadv — avis d'expédition (DESADV)
+-- Associe un numéro de BL annoncé au fournisseur expéditeur : l'app Création
+-- s'en sert pour renseigner automatiquement le fournisseur. Alimentée par le
+-- flux EDI.
 -- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS poc_bl.projet_livraison.base_article (
-  item            STRING NOT NULL COMMENT 'Numéro article P-00xxxxxx',
-  nom_fournisseur STRING NOT NULL COMMENT 'Fournisseur connu pour cet article'
+CREATE TABLE IF NOT EXISTS poc_bl.projet_livraison.base_desadv (
+  numero_bl       STRING NOT NULL COMMENT 'Numéro de BL annoncé par l''avis d''expédition',
+  nom_fournisseur STRING NOT NULL COMMENT 'Fournisseur expéditeur (lié à base_frs.name)'
 )
-COMMENT 'Référentiel articles / fournisseurs connus';
+COMMENT 'Avis d''expédition (DESADV) — résolution automatique du fournisseur';
 
 -- ----------------------------------------------------------------------------
 -- Table 4 : base_frs — référentiel fournisseurs
@@ -85,17 +86,15 @@ USING (
 ON cible.name = src.name
 WHEN NOT MATCHED THEN INSERT (name) VALUES (src.name);
 
-MERGE INTO poc_bl.projet_livraison.base_article AS cible
+MERGE INTO poc_bl.projet_livraison.base_desadv AS cible
 USING (
   SELECT * FROM (VALUES
-    ('P-00123456', 'FRN1'),
-    ('P-00123456', 'FRN2'),
-    ('P-00654321', 'TRANSPORTS DUPONT'),
-    ('P-00111222', 'LOGISTIQUE MARTIN')
-  ) AS v(item, nom_fournisseur)
+    ('BL-2026-0001', 'FRN1'),
+    ('BL-2026-0002', 'TRANSPORTS DUPONT')
+  ) AS v(numero_bl, nom_fournisseur)
 ) AS src
-ON cible.item = src.item AND cible.nom_fournisseur = src.nom_fournisseur
-WHEN NOT MATCHED THEN INSERT (item, nom_fournisseur) VALUES (src.item, src.nom_fournisseur);
+ON cible.numero_bl = src.numero_bl AND cible.nom_fournisseur = src.nom_fournisseur
+WHEN NOT MATCHED THEN INSERT (numero_bl, nom_fournisseur) VALUES (src.numero_bl, src.nom_fournisseur);
 
 -- ============================================================================
 -- DROITS DES APPLICATIONS (à exécuter APRÈS le premier déploiement des apps)
@@ -109,12 +108,12 @@ WHEN NOT MATCHED THEN INSERT (item, nom_fournisseur) VALUES (src.item, src.nom_f
 -- GRANT USE SCHEMA  ON SCHEMA  poc_bl.projet_livraison TO `<SP_APP_CREATION>`;
 -- GRANT SELECT, MODIFY ON TABLE poc_bl.projet_livraison.suivi_bl          TO `<SP_APP_CREATION>`;
 -- GRANT SELECT, MODIFY ON TABLE poc_bl.projet_livraison.pieces_jointes_bl TO `<SP_APP_CREATION>`;
--- GRANT SELECT ON TABLE poc_bl.projet_livraison.base_article TO `<SP_APP_CREATION>`;
+-- GRANT SELECT ON TABLE poc_bl.projet_livraison.base_desadv TO `<SP_APP_CREATION>`;
 -- GRANT SELECT ON TABLE poc_bl.projet_livraison.base_frs     TO `<SP_APP_CREATION>`;
 
 -- GRANT USE CATALOG ON CATALOG poc_bl TO `<SP_APP_ADMINISTRATION>`;
 -- GRANT USE SCHEMA  ON SCHEMA  poc_bl.projet_livraison TO `<SP_APP_ADMINISTRATION>`;
 -- GRANT SELECT, MODIFY ON TABLE poc_bl.projet_livraison.suivi_bl          TO `<SP_APP_ADMINISTRATION>`;
 -- GRANT SELECT, MODIFY ON TABLE poc_bl.projet_livraison.pieces_jointes_bl TO `<SP_APP_ADMINISTRATION>`;
--- GRANT SELECT ON TABLE poc_bl.projet_livraison.base_article TO `<SP_APP_ADMINISTRATION>`;
+-- GRANT SELECT ON TABLE poc_bl.projet_livraison.base_desadv TO `<SP_APP_ADMINISTRATION>`;
 -- GRANT SELECT ON TABLE poc_bl.projet_livraison.base_frs     TO `<SP_APP_ADMINISTRATION>`;
