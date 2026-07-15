@@ -13,6 +13,7 @@ from bl_core.identity import get_current_user
 st.set_page_config(page_title="Administration BL", page_icon="🗂️", layout="wide")
 
 ui.configurer_logs()
+ui.injecter_style()
 
 st.title("🗂️ Administration des BL")
 ui.show_flash()
@@ -26,7 +27,7 @@ with st.container(border=True):
         f_fournisseur = st.text_input("Fournisseur contient").strip()
         f_numero = st.text_input("Numéro de BL contient").strip()
     with col2:
-        f_article = st.text_input("Numéro d'article contient").strip()
+        f_quai = st.selectbox("Quai de réception", ["Tous"] + repository.QUAIS_RECEPTION)
         f_statut = st.selectbox("État de réception", ["Tous", "OK", "EDI NOK"])
     with col3:
         f_date_min = st.date_input("Reçu à partir du", value=None)
@@ -41,7 +42,7 @@ statut_filtre = {"OK": repository.STATUT_OK, "EDI NOK": repository.STATUT_EDI_NO
 
 # La pagination est réinitialisée quand les filtres changent (sinon on peut se
 # retrouver sur une page vide au-delà du nouveau total).
-signature_filtres = (f_fournisseur, f_numero, f_article, str(f_date_min), str(f_date_max),
+signature_filtres = (f_fournisseur, f_numero, f_quai, str(f_date_min), str(f_date_max),
                      f_statut, f_inclure_supprimes, page_size)
 if st.session_state.get("signature_filtres") != signature_filtres:
     st.session_state.signature_filtres = signature_filtres
@@ -53,7 +54,8 @@ st.session_state.setdefault("page", 1)
 # =====================================================================
 try:
     df_bl, total = repository.rechercher_bl(
-        fournisseur=f_fournisseur, numero=f_numero, article=f_article,
+        fournisseur=f_fournisseur, numero=f_numero,
+        quai="" if f_quai == "Tous" else f_quai,
         date_min=f_date_min, date_max=f_date_max, statut=statut_filtre,
         inclure_supprimes=f_inclure_supprimes,
         page=st.session_state.page, page_size=page_size,
@@ -93,7 +95,8 @@ for _, bl in df_bl.iterrows():
     id_bl = bl["id_bl"]
     chemins = photos_par_bl.get(id_bl, [])
     marqueur = " · 🗑️ SUPPRIMÉ" if bl.get("est_supprime") else ""
-    titre = (f"📄 BL n° {bl['numero_bl']} — {bl['nom_fournisseur']} — "
+    quai_titre = f" — quai {bl['quai_reception']}" if bl.get("quai_reception") else ""
+    titre = (f"📄 BL n° {bl['numero_bl']} — {bl['nom_fournisseur']}{quai_titre} — "
              f"{ui.libelle_statut(bl['statut_bl'])} ({len(chemins)} page(s)){marqueur}")
 
     with st.expander(titre):
@@ -104,11 +107,14 @@ for _, bl in df_bl.iterrows():
             with st.form(key=f"form_{id_bl}"):
                 nouveau_numero = st.text_input("Numéro de BL", value=bl["numero_bl"], max_chars=60)
                 nouvelle_date = st.date_input("Date de réception", value=bl["date_reception"])
-                nouvel_article = st.text_input("Numéro d'article", value=bl["num_article"] or "")
                 index_frs = (tous_fournisseurs.index(bl["nom_fournisseur"])
                              if bl["nom_fournisseur"] in tous_fournisseurs else None)
                 nouveau_frs = st.selectbox("Fournisseur", options=tous_fournisseurs, index=index_frs,
                                            placeholder="Choisir…")
+                index_quai = (repository.QUAIS_RECEPTION.index(bl["quai_reception"])
+                              if bl.get("quai_reception") in repository.QUAIS_RECEPTION else None)
+                nouveau_quai = st.selectbox("Quai de réception", options=repository.QUAIS_RECEPTION,
+                                            index=index_quai, placeholder="Non renseigné (BL antérieur)")
                 nouveau_statut = st.radio(
                     "État de réception", ["OK", "EDI NOK"], horizontal=True,
                     index=0 if bl["statut_bl"] == repository.STATUT_OK else 1,
@@ -118,19 +124,17 @@ for _, bl in df_bl.iterrows():
                 if st.form_submit_button("💾 Enregistrer les modifications", type="primary",
                                          use_container_width=True):
                     try:
-                        repository.mettre_a_jour_bl(
-                            id_bl,
-                            {
-                                "numero_bl": nouveau_numero.strip(),
-                                "date_reception": nouvelle_date,
-                                "num_article": nouvel_article.strip(),
-                                "nom_fournisseur": nouveau_frs,
-                                "statut_bl": repository.STATUT_OK if nouveau_statut == "OK"
-                                             else repository.STATUT_EDI_NOK,
-                                "comment_bl": nouveau_commentaire.strip(),
-                            },
-                            utilisateur,
-                        )
+                        champs = {
+                            "numero_bl": nouveau_numero.strip(),
+                            "date_reception": nouvelle_date,
+                            "nom_fournisseur": nouveau_frs,
+                            "statut_bl": repository.STATUT_OK if nouveau_statut == "OK"
+                                         else repository.STATUT_EDI_NOK,
+                            "comment_bl": nouveau_commentaire.strip(),
+                        }
+                        if nouveau_quai:  # BL antérieurs : quai absent tant que non choisi
+                            champs["quai_reception"] = nouveau_quai
+                        repository.mettre_a_jour_bl(id_bl, champs, utilisateur)
                         ui.set_flash("success", f"BL {nouveau_numero} mis à jour.")
                         st.rerun()
                     except Exception as e:
