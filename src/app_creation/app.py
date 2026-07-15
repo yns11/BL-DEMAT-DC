@@ -118,13 +118,30 @@ elif etape == 2:
         tous_fournisseurs = []
         st.error(f"Impossible de charger les fournisseurs : {e}")
 
+    # Sur smartphone, la liste déroulante n'ouvre pas le clavier (Streamlit
+    # désactive la saisie tactile dans st.selectbox) : le filtrage se fait donc
+    # dans un champ texte dédié, qui restreint les options de la liste.
+    filtre_frs = st.text_input(
+        "Filtrer les fournisseurs", value="",
+        placeholder="Tapez quelques lettres pour filtrer la liste…",
+    )
+    if filtre_frs.strip():
+        fournisseurs_affiches = [f for f in tous_fournisseurs
+                                 if filtre_frs.strip().lower() in f.lower()]
+        if not fournisseurs_affiches:
+            st.caption("Aucun fournisseur ne correspond à ce filtre.")
+    else:
+        fournisseurs_affiches = tous_fournisseurs
+
     index_frs = None
-    if donnees.get("fournisseur") in tous_fournisseurs:
-        index_frs = tous_fournisseurs.index(donnees["fournisseur"])
-    elif frs_connus and frs_connus[0] in tous_fournisseurs:
-        index_frs = tous_fournisseurs.index(frs_connus[0])
+    if donnees.get("fournisseur") in fournisseurs_affiches:
+        index_frs = fournisseurs_affiches.index(donnees["fournisseur"])
+    elif frs_connus and frs_connus[0] in fournisseurs_affiches:
+        index_frs = fournisseurs_affiches.index(frs_connus[0])
+    elif len(fournisseurs_affiches) == 1:
+        index_frs = 0                        # un seul résultat filtré : présélection
     fournisseur = st.selectbox(
-        "Fournisseur * (tapez pour filtrer)", options=tous_fournisseurs,
+        "Fournisseur *", options=fournisseurs_affiches,
         index=index_frs, placeholder="Choisir un fournisseur…",
     )
 
@@ -192,12 +209,21 @@ elif etape == 3:
 
     if photo_brute is not None:
         mode = st.radio("Rendu du scan", images.MODES_SCAN, index=2, horizontal=True,
-                        help="Le redressement de perspective et la compression "
-                             "s'appliquent dans tous les modes.")
+                        help="La limite de taille et la compression s'appliquent "
+                             "dans tous les modes.")
+        cadrage_auto = st.toggle(
+            "Cadrage automatique (détection du contour et redressement)", value=True,
+            help="Désactivez si le cadrage automatique donne un résultat inattendu : "
+                 "la photo est alors conservée telle quelle (le rendu, la taille et "
+                 "la compression restent appliqués).",
+        )
         try:
             with st.spinner("Traitement de la page…"):
-                page_traitee = images.scanner_document(photo_brute, mode)
+                page_traitee, redressee = images.scanner_document(photo_brute, mode, cadrage_auto)
             st.image(page_traitee, caption=f"Aperçu — {mode}", use_column_width=True)
+            if cadrage_auto and not redressee:
+                st.caption("ℹ️ Contour du document non détecté : la photo entière "
+                           "est conservée, sans redressement.")
             with st.expander("Voir la photo originale"):
                 try:
                     st.image(photo_brute, use_column_width=True)
