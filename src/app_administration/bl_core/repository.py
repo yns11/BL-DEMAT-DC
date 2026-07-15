@@ -25,6 +25,9 @@ logger = logging.getLogger("bl.repository")
 STATUT_OK = "1"
 STATUT_EDI_NOK = "0"
 
+# Quais de réception du site (valeur obligatoire à la création d'un BL).
+QUAIS_RECEPTION = ["B15", "B06EST", "B06NORD", "B02NORD", "AUTRE"]
+
 
 # ---------------------------------------------------------------------------
 # Connexions (mises en cache : une par processus d'app, pas une par requête)
@@ -83,15 +86,19 @@ def lister_fournisseurs() -> list[str]:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def fournisseurs_pour_article(num_article: str) -> list[str]:
+def fournisseur_pour_bl(numero_bl: str) -> Optional[str]:
+    """Fournisseur annoncé par l'avis d'expédition (DESADV) pour ce numéro de
+    BL — None si le BL n'y figure pas (l'utilisateur choisira manuellement)."""
     s = get_settings()
     df = _run(
-        f"SELECT DISTINCT nom_fournisseur FROM {s.table_articles} "
-        "WHERE item = %(item)s ORDER BY nom_fournisseur",
-        params={"item": num_article},
+        f"SELECT nom_fournisseur FROM {s.table_desadv} "
+        "WHERE upper(numero_bl) = upper(%(num)s) LIMIT 1",
+        params={"num": numero_bl},
         fetch=True,
     )
-    return df["nom_fournisseur"].tolist() if df is not None else []
+    if df is None or df.empty:
+        return None
+    return df["nom_fournisseur"].iloc[0]
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +137,8 @@ def inserer_bl(
     id_bl: str,
     numero_bl: str,
     date_reception: datetime.date,
-    num_article: str,
     nom_fournisseur: str,
+    quai_reception: str,
     statut_bl: str,
     comment_bl: str,
     operation_archivage: bool,
@@ -141,18 +148,18 @@ def inserer_bl(
     _run(
         f"""
         INSERT INTO {s.table_suivi}
-          (id_bl, numero_bl, date_reception, num_article, nom_fournisseur,
+          (id_bl, numero_bl, date_reception, nom_fournisseur, quai_reception,
            statut_bl, comment_bl, saisie_par, saisie_le, operation_type, est_supprime)
         VALUES
-          (%(id)s, %(num)s, %(dr)s, %(art)s, %(frs)s,
+          (%(id)s, %(num)s, %(dr)s, %(frs)s, %(quai)s,
            %(st)s, %(com)s, %(par)s, current_timestamp(), %(op)s, false)
         """,
         params={
             "id": id_bl,
             "num": numero_bl,
             "dr": date_reception,
-            "art": num_article,
             "frs": nom_fournisseur,
+            "quai": quai_reception,
             "st": statut_bl,
             "com": comment_bl,
             "par": utilisateur,
@@ -195,7 +202,7 @@ def pages_enregistrees(id_bl: str) -> set[int]:
 def rechercher_bl(
     fournisseur: str = "",
     numero: str = "",
-    article: str = "",
+    quai: str = "",
     date_min: Optional[datetime.date] = None,
     date_max: Optional[datetime.date] = None,
     statut: Optional[str] = None,
@@ -216,9 +223,9 @@ def rechercher_bl(
     if numero:
         conditions.append("lower(numero_bl) LIKE %(num)s")
         params["num"] = f"%{numero.lower()}%"
-    if article:
-        conditions.append("lower(num_article) LIKE %(art)s")
-        params["art"] = f"%{article.lower()}%"
+    if quai:
+        conditions.append("quai_reception = %(quai)s")
+        params["quai"] = quai
     if date_min:
         conditions.append("date_reception >= %(dmin)s")
         params["dmin"] = date_min
@@ -241,7 +248,7 @@ def rechercher_bl(
     params_page["off"] = max(page - 1, 0) * page_size
     df = _run(
         f"""
-        SELECT id_bl, numero_bl, date_reception, num_article, nom_fournisseur,
+        SELECT id_bl, numero_bl, date_reception, nom_fournisseur, quai_reception,
                statut_bl, comment_bl, saisie_par, saisie_le, modifie_par, modifie_le,
                operation_type, est_supprime
         FROM {s.table_suivi}
@@ -283,7 +290,7 @@ def telecharger_photo(chemin: str) -> bytes:
 # ---------------------------------------------------------------------------
 # Mise à jour / suppression logique (app Administration)
 # ---------------------------------------------------------------------------
-CHAMPS_MODIFIABLES = {"numero_bl", "date_reception", "num_article", "nom_fournisseur", "statut_bl", "comment_bl"}
+CHAMPS_MODIFIABLES = {"numero_bl", "date_reception", "nom_fournisseur", "quai_reception", "statut_bl", "comment_bl"}
 
 
 def mettre_a_jour_bl(id_bl: str, champs: dict, utilisateur: str) -> None:
