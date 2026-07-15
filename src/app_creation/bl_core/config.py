@@ -24,8 +24,8 @@ class Settings:
         return f"{self.catalog}.{self.schema}.pieces_jointes_bl"
 
     @property
-    def table_articles(self) -> str:
-        return f"{self.catalog}.{self.schema}.base_article"
+    def table_desadv(self) -> str:
+        return f"{self.catalog}.{self.schema}.base_desadv"
 
     @property
     def table_fournisseurs(self) -> str:
