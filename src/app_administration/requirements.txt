@@ -1,0 +1,9 @@
+# Versions épinglées (CDC) : une montée de version ne peut pas casser l'app.
+# streamlit 1.38.0 = version préinstallée du runtime Databricks Apps (install rapide).
+# Pas d'OpenCV ici : l'app Administration affiche les images sans les traiter
+# (bl_core/images.py n'est jamais importé par cette app).
+streamlit==1.38.0
+databricks-sql-connector==3.7.3
+databricks-sdk==0.38.0
+pandas==2.2.3
+numpy==1.26.4

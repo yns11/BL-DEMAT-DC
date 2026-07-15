@@ -1,0 +1,33 @@
+# Bundle de déploiement de la solution "BL dématérialisés" (2 Databricks Apps).
+# Déploiement : databricks bundle deploy -t dev --profile <PROFIL>
+# Démarrage   : databricks bundle run bl_creation -t dev --profile <PROFIL>
+#               databricks bundle run bl_administration -t dev --profile <PROFIL>
+bundle:
+  name: bl-dematerialise
+
+include:
+  - resources/*.yml
+
+variables:
+  warehouse_id:
+    description: SQL Warehouse utilisé par les deux applications
+    lookup:
+      warehouse: "Serverless Starter Warehouse"
+  catalog:
+    description: Catalogue Unity Catalog
+    default: poc_bl
+  schema:
+    description: Schéma Unity Catalog
+    default: projet_livraison
+  volume:
+    description: Volume UC de stockage des images
+    default: images_bl
+
+targets:
+  dev:
+    default: true
+
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}

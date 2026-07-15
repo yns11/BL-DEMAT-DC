@@ -1,0 +1,15 @@
+command: ["streamlit", "run", "app.py"]
+
+env:
+  # Injectés par les ressources d'app déclarées dans le bundle (valueFrom = clé de ressource).
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: BL_VOLUME_PATH
+    valueFrom: volume
+  # Configuration externalisée (CDC) : rien en dur dans le code.
+  - name: BL_CATALOG
+    value: "poc_bl"
+  - name: BL_SCHEMA
+    value: "projet_livraison"
+  - name: BL_PAGE_SIZE
+    value: "25"

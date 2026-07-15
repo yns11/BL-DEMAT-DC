@@ -1,0 +1,18 @@
+resources:
+  apps:
+    bl_creation:
+      name: bl-creation-${bundle.target}
+      description: "Création de BL dématérialisés — opérateurs terrain (mobile)"
+      source_code_path: ../src/app_creation
+      resources:
+        - name: sql-warehouse
+          description: Warehouse pour lire/écrire les tables Delta
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: volume
+          description: Volume UC des images de BL (écriture des photos)
+          uc_securable:
+            securable_type: VOLUME
+            securable_full_name: ${var.catalog}.${var.schema}.${var.volume}
+            permission: WRITE_VOLUME
