@@ -36,18 +36,20 @@ _RATIO_A4 = 297.0 / 210.0  # hauteur / largeur en portrait
 
 
 def _decoder_image(image_bytes: bytes):
-    """Octets -> image BGR. OpenCV d'abord (rapide, couvre JPEG/PNG), repli
-    Pillow pour les formats qu'OpenCV ignore (HEIC/HEIF des smartphones), en
-    appliquant l'orientation EXIF que ce chemin doit gérer lui-même."""
-    img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
-    if img is not None:
-        return img
+    """Octets -> image BGR, orientation EXIF appliquée. Pillow en premier
+    (JPEG/PNG, HEIC/HEIF via pillow-heif) : les photos de smartphone stockent
+    souvent la rotation dans l'EXIF, qu'OpenCV ignore — sans cette étape le
+    document ressort couché. Repli OpenCV pour les cas que Pillow refuse."""
     try:
         pil = Image.open(io.BytesIO(image_bytes))
         pil = ImageOps.exif_transpose(pil).convert("RGB")
-    except Exception as e:
-        raise ValueError("Image illisible ou format non supporté.") from e
-    return cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
+        return cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
+    except Exception:
+        pass
+    img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("Image illisible ou format non supporté.")
+    return img
 
 
 def _order_points(pts):
@@ -66,8 +68,8 @@ def _four_point_transform(image, pts):
     """Aplatit le document (corrige la perspective) à partir de ses 4 coins."""
     rect = _order_points(pts)
     (tl, tr, br, bl) = rect
-    max_width = max(int(np.linalg.norm(br - bl)), int(np.linalg.norm(tr - tl)))
-    max_height = max(int(np.linalg.norm(tr - br)), int(np.linalg.norm(tl - bl)))
+    max_width = max(int(np.linalg.norm(br - bl)), int(np.linalg.norm(tr - tl)), 1)
+    max_height = max(int(np.linalg.norm(tr - br)), int(np.linalg.norm(tl - bl)), 1)
 
     # Rapprochement du format A4 (CDC) : si le ratio détecté est proche de
     # celui d'un A4 (portrait ou paysage), on force le ratio exact — le léger
@@ -86,27 +88,62 @@ def _four_point_transform(image, pts):
     return cv2.warpPerspective(image, M, (max_width, max_height))
 
 
-def _detecter_et_redresser(img):
-    """Détecte le contour de la feuille et corrige la perspective. Repli sur
-    l'image entière si aucun quadrilatère n'est trouvé."""
-    orig = img.copy()
-    # Détection des bords sur une version réduite (plus rapide et plus robuste)
-    ratio = img.shape[0] / 500.0
-    small = cv2.resize(img, (int(img.shape[1] / ratio), 500))
+def _quadrilatere_plausible(quad, aire_image: float) -> bool:
+    """Garde-fous contre les faux positifs (tampon, fenêtre, ombre…) : le
+    quadrilatère doit être convexe, couvrir une part significative de la photo
+    et avoir des proportions de document. Sinon, mieux vaut conserver la photo
+    entière qu'un recadrage aberrant."""
+    if not cv2.isContourConvex(quad.reshape(4, 1, 2).astype(np.int32)):
+        return False
+    if cv2.contourArea(quad.astype("float32")) < 0.20 * aire_image:
+        return False
+    rect = _order_points(quad.astype("float32"))
+    (tl, tr, br, bl) = rect
+    largeur = max(np.linalg.norm(br - bl), np.linalg.norm(tr - tl))
+    hauteur = max(np.linalg.norm(tr - br), np.linalg.norm(tl - bl))
+    if min(largeur, hauteur) < 1:
+        return False
+    ratio = hauteur / largeur
+    return 0.4 <= ratio <= 2.5
 
+
+def _detecter_contour_feuille(small):
+    """Cherche le contour de la feuille sur l'image réduite. Renvoie le
+    quadrilatère (4, 2) ou None si aucun candidat plausible."""
     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
     edged = cv2.Canny(gray, 75, 200)
+    # Referme les petites coupures du tracé (pli, ombre, doigt sur le bord)
+    # pour que le contour de la feuille reste un polygone fermé.
+    edged = cv2.morphologyEx(edged, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
 
     contours, _ = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     contours = sorted(contours, key=cv2.contourArea, reverse=True)[:5]
+    aire_image = float(small.shape[0] * small.shape[1])
 
     for c in contours:
         peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        if len(approx) == 4:                 # un quadrilatère = probablement la feuille
-            return _four_point_transform(orig, approx.reshape(4, 2) * ratio)
-    return orig                              # repli : pas de découpe/redressement
+        # Deux tolérances d'approximation : 2 % (contour net) puis 4 %
+        # (coins légèrement arrondis ou tracé bruité).
+        for epsilon in (0.02, 0.04):
+            approx = cv2.approxPolyDP(c, epsilon * peri, True)
+            if len(approx) == 4 and _quadrilatere_plausible(approx.reshape(4, 2), aire_image):
+                return approx.reshape(4, 2)
+    return None
+
+
+def _detecter_et_redresser(img):
+    """Détecte le contour de la feuille et corrige la perspective.
+    Renvoie (image, True) si un contour plausible a été redressé,
+    (image d'origine, False) sinon — jamais de recadrage hasardeux."""
+    # Détection des bords sur une version réduite (plus rapide et plus robuste)
+    ratio = img.shape[0] / 500.0
+    small = cv2.resize(img, (max(1, int(img.shape[1] / ratio)), 500))
+
+    quad = _detecter_contour_feuille(small)
+    if quad is None:
+        return img, False                    # repli : pas de découpe/redressement
+    return _four_point_transform(img, quad.astype("float32") * ratio), True
 
 
 def _limiter_dimension(img, max_px: int):
@@ -164,17 +201,24 @@ def _compresser_jpeg(img, taille_max: int) -> bytes:
 
 
 @st.cache_data(show_spinner=False, max_entries=30)
-def scanner_document(image_bytes: bytes, mode: str = "Gris réhaussé") -> bytes:
-    """Photo brute -> document scanné (octets JPEG <= 2 Mo).
+def scanner_document(
+    image_bytes: bytes, mode: str = "Gris réhaussé", corriger_perspective: bool = True
+) -> tuple[bytes, bool]:
+    """Photo brute -> document scanné.
 
-    Dans TOUS les modes : redressement de perspective + limite de dimension +
-    compression bornée (opérations de base exigées par le CDC). Le mode ne
-    change que le rendu visuel.
+    Renvoie (octets JPEG <= 2 Mo, perspective_corrigee). Limite de dimension et
+    compression bornée s'appliquent dans TOUS les cas (exigences du CDC) ; le
+    mode ne change que le rendu visuel. `corriger_perspective=False` conserve le
+    cadrage d'origine (le redressement est aussi abandonné de lui-même quand
+    aucun contour plausible n'est détecté : perspective_corrigee vaut False).
     """
     img = _decoder_image(image_bytes)
 
     settings = get_settings()
-    redresse = _limiter_dimension(_detecter_et_redresser(img), settings.max_dimension_px)
+    perspective_corrigee = False
+    if corriger_perspective:
+        img, perspective_corrigee = _detecter_et_redresser(img)
+    redresse = _limiter_dimension(img, settings.max_dimension_px)
 
     if mode == "Sans filtre":
         rendu = redresse
@@ -187,4 +231,4 @@ def scanner_document(image_bytes: bytes, mode: str = "Gris réhaussé") -> bytes
             _, gris = cv2.threshold(gris, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         rendu = gris
 
-    return _compresser_jpeg(rendu, settings.max_image_bytes)
+    return _compresser_jpeg(rendu, settings.max_image_bytes), perspective_corrigee
