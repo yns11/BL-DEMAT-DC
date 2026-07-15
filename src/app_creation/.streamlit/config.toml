@@ -1,0 +1,10 @@
+# Thème de l'application (complété par bl_core/ui.py -> injecter_style()).
+[theme]
+base = "light"
+primaryColor = "#0F62A6"
+backgroundColor = "#F6F8FB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1B2A3A"
+
+[browser]
+gatherUsageStats = false
