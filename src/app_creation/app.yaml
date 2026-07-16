@@ -15,3 +15,7 @@ env:
     value: "2097152"
   - name: BL_MAX_DIMENSION_PX
     value: "3508"
+  # Fuseau du site : préremplissage de la plage horaire de réception
+  # (le conteneur tourne en UTC).
+  - name: BL_FUSEAU
+    value: "Europe/Paris"
