@@ -5,9 +5,11 @@ pages scannées, correction des données (UPDATE), suppression logique et
 restauration — avec traçabilité complète (qui / quand).
 """
 
+import datetime
+
 import streamlit as st
 
-from bl_core import repository, ui
+from bl_core import notifications, repository, ui
 from bl_core.identity import get_current_user
 
 st.set_page_config(page_title="Administration BL", page_icon="🗂️", layout="wide")
@@ -28,10 +30,13 @@ with st.container(border=True):
         f_numero = st.text_input("Numéro de BL contient").strip()
     with col2:
         f_quai = st.selectbox("Quai de réception", ["Tous"] + repository.QUAIS_RECEPTION)
-        f_statut = st.selectbox("État de réception", ["Tous", "OK", "EDI NOK"])
+        # Par défaut : les EDI NOK (ce sont eux qui demandent une action).
+        f_statut = st.selectbox("État de réception", ["Tous", "OK", "EDI NOK"], index=2)
     with col3:
-        f_date_min = st.date_input("Reçu à partir du", value=None)
-        f_date_max = st.date_input("Reçu jusqu'au", value=None)
+        # Par défaut : les BL de la veille et d'aujourd'hui (toute plage horaire).
+        aujourdhui = repository.maintenant_local().date()
+        f_date_min = st.date_input("Reçu à partir du", value=aujourdhui - datetime.timedelta(days=1))
+        f_date_max = st.date_input("Reçu jusqu'au", value=aujourdhui)
     col4, col5 = st.columns(3)[:2]
     with col4:
         f_inclure_supprimes = st.checkbox("Inclure les BL supprimés")
@@ -107,6 +112,11 @@ for _, bl in df_bl.iterrows():
             with st.form(key=f"form_{id_bl}"):
                 nouveau_numero = st.text_input("Numéro de BL", value=bl["numero_bl"], max_chars=60)
                 nouvelle_date = st.date_input("Date de réception", value=bl["date_reception"])
+                index_plage = (repository.PLAGES_HORAIRES.index(bl["plage_horaire"])
+                               if bl.get("plage_horaire") in repository.PLAGES_HORAIRES else None)
+                nouvelle_plage = st.selectbox("Plage horaire de réception",
+                                              options=repository.PLAGES_HORAIRES, index=index_plage,
+                                              placeholder="Non renseignée (archivage ou BL antérieur)")
                 index_frs = (tous_fournisseurs.index(bl["nom_fournisseur"])
                              if bl["nom_fournisseur"] in tous_fournisseurs else None)
                 nouveau_frs = st.selectbox("Fournisseur", options=tous_fournisseurs, index=index_frs,
@@ -134,8 +144,30 @@ for _, bl in df_bl.iterrows():
                         }
                         if nouveau_quai:  # BL antérieurs : quai absent tant que non choisi
                             champs["quai_reception"] = nouveau_quai
+                        if nouvelle_plage:
+                            champs["plage_horaire"] = nouvelle_plage
+                        # Transition EDI NOK -> OK : à notifier par email (après
+                        # l'UPDATE, pour ne jamais bloquer la mise à jour).
+                        passe_a_ok = (bl["statut_bl"] == repository.STATUT_EDI_NOK
+                                      and champs["statut_bl"] == repository.STATUT_OK)
                         repository.mettre_a_jour_bl(id_bl, champs, utilisateur)
-                        ui.set_flash("success", f"BL {nouveau_numero} mis à jour.")
+                        if passe_a_ok:
+                            envoye = notifications.notifier_passage_ok(
+                                numero_bl=nouveau_numero.strip(),
+                                fournisseur=nouveau_frs,
+                                quai=champs.get("quai_reception", ""),
+                                date_reception=nouvelle_date,
+                                utilisateur=utilisateur,
+                            )
+                            if envoye:
+                                ui.set_flash("success",
+                                             f"BL {nouveau_numero} mis à jour — passage à OK notifié par email.")
+                            else:
+                                ui.set_flash("warning",
+                                             f"BL {nouveau_numero} mis à jour, mais la notification email "
+                                             "n'a pas pu être envoyée (voir les logs de l'app).")
+                        else:
+                            ui.set_flash("success", f"BL {nouveau_numero} mis à jour.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Échec de la mise à jour : {e}")
