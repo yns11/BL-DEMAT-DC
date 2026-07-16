@@ -69,6 +69,19 @@ if etape == 1:
     numero = st.text_input("Numéro du BL *", value=donnees.get("numero", ""), max_chars=60)
     date_reception = st.date_input("Date de réception *", value=donnees.get("date_reception", datetime.date.today()))
 
+    # Plage horaire de réception : uniquement pour une nouvelle réception
+    # (un archivage concerne un BL ancien, sans heure pertinente). Préremplie
+    # avec la plage contenant l'heure locale courante.
+    if archivage:
+        plage = None
+    else:
+        plage_defaut = (donnees["plage"] if donnees.get("plage") in repository.PLAGES_HORAIRES
+                        else repository.plage_horaire_courante())
+        plage = st.selectbox(
+            "Plage horaire de réception *", options=repository.PLAGES_HORAIRES,
+            index=repository.PLAGES_HORAIRES.index(plage_defaut),
+        )
+
     # --- Fournisseur : automatique via l'avis d'expédition (DESADV) quand le
     # numéro de BL y figure ; sélection manuelle (filtre + liste) sinon. ---
     frs_desadv = None
@@ -151,7 +164,7 @@ if etape == 1:
         else:
             donnees.update({
                 "numero": numero.strip(), "date_reception": date_reception,
-                "archivage": archivage, "fournisseur": fournisseur,
+                "plage": plage, "archivage": archivage, "fournisseur": fournisseur,
                 "fournisseur_desadv": bool(frs_desadv), "quai": quai,
                 "statut": statut, "commentaire": commentaire.strip(),
             })
@@ -257,6 +270,7 @@ elif etape == 3:
 | **Opération** | {"Archivage" if donnees.get("archivage") else "Nouvelle réception"} |
 | **Numéro de BL** | {donnees.get("numero", "")} |
 | **Date de réception** | {donnees.get("date_reception", "")} |
+| **Plage horaire** | {donnees.get("plage") or "—"} |
 | **Fournisseur** | {donnees.get("fournisseur", "")}{origine_frs} |
 | **Quai de réception** | {donnees.get("quai", "")} |
 | **État de réception** | {ui.libelle_statut(donnees.get("statut", repository.STATUT_OK))} |
@@ -279,6 +293,7 @@ elif etape == 3:
                         id_bl=id_bl,
                         numero_bl=numero_final,
                         date_reception=donnees["date_reception"],
+                        plage_horaire=donnees.get("plage"),
                         nom_fournisseur=donnees["fournisseur"],
                         quai_reception=donnees["quai"],
                         statut_bl=donnees["statut"],
