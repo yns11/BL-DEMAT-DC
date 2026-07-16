@@ -8,9 +8,11 @@
 """
 
 import logging
+import os
 import uuid
 import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -27,6 +29,31 @@ STATUT_EDI_NOK = "0"
 
 # Quais de réception du site (valeur obligatoire à la création d'un BL).
 QUAIS_RECEPTION = ["B15", "B06EST", "B06NORD", "B02NORD", "AUTRE"]
+
+# Plages horaires de réception : 2 h entre 06h et 20h, plus les plages de
+# nuit 00h-06h et 20h-00h. Obligatoire pour une nouvelle réception.
+PLAGES_HORAIRES = ["00h-06h"] + [f"{h:02d}h-{h + 2:02d}h" for h in range(6, 20, 2)] + ["20h-00h"]
+
+
+def maintenant_local() -> datetime.datetime:
+    """Heure locale du site (le conteneur d'app tourne en UTC : sans fuseau,
+    le préremplissage de la plage horaire serait décalé)."""
+    try:
+        fuseau = ZoneInfo(os.environ.get("BL_FUSEAU", "Europe/Paris"))
+    except Exception:
+        fuseau = None
+    return datetime.datetime.now(fuseau)
+
+
+def plage_horaire_courante() -> str:
+    """Plage horaire contenant l'heure locale courante (préremplissage)."""
+    h = maintenant_local().hour
+    if h < 6:
+        return PLAGES_HORAIRES[0]
+    if h >= 20:
+        return PLAGES_HORAIRES[-1]
+    debut = 6 + ((h - 6) // 2) * 2
+    return f"{debut:02d}h-{debut + 2:02d}h"
 
 
 # ---------------------------------------------------------------------------
@@ -143,21 +170,23 @@ def inserer_bl(
     comment_bl: str,
     operation_archivage: bool,
     utilisateur: str,
+    plage_horaire: Optional[str] = None,
 ) -> None:
     s = get_settings()
     _run(
         f"""
         INSERT INTO {s.table_suivi}
-          (id_bl, numero_bl, date_reception, nom_fournisseur, quai_reception,
+          (id_bl, numero_bl, date_reception, plage_horaire, nom_fournisseur, quai_reception,
            statut_bl, comment_bl, saisie_par, saisie_le, operation_type, est_supprime)
         VALUES
-          (%(id)s, %(num)s, %(dr)s, %(frs)s, %(quai)s,
+          (%(id)s, %(num)s, %(dr)s, %(plage)s, %(frs)s, %(quai)s,
            %(st)s, %(com)s, %(par)s, current_timestamp(), %(op)s, false)
         """,
         params={
             "id": id_bl,
             "num": numero_bl,
             "dr": date_reception,
+            "plage": plage_horaire,
             "frs": nom_fournisseur,
             "quai": quai_reception,
             "st": statut_bl,
@@ -248,7 +277,7 @@ def rechercher_bl(
     params_page["off"] = max(page - 1, 0) * page_size
     df = _run(
         f"""
-        SELECT id_bl, numero_bl, date_reception, nom_fournisseur, quai_reception,
+        SELECT id_bl, numero_bl, date_reception, plage_horaire, nom_fournisseur, quai_reception,
                statut_bl, comment_bl, saisie_par, saisie_le, modifie_par, modifie_le,
                operation_type, est_supprime
         FROM {s.table_suivi}
@@ -290,7 +319,8 @@ def telecharger_photo(chemin: str) -> bytes:
 # ---------------------------------------------------------------------------
 # Mise à jour / suppression logique (app Administration)
 # ---------------------------------------------------------------------------
-CHAMPS_MODIFIABLES = {"numero_bl", "date_reception", "nom_fournisseur", "quai_reception", "statut_bl", "comment_bl"}
+CHAMPS_MODIFIABLES = {"numero_bl", "date_reception", "plage_horaire", "nom_fournisseur",
+                      "quai_reception", "statut_bl", "comment_bl"}
 
 
 def mettre_a_jour_bl(id_bl: str, champs: dict, utilisateur: str) -> None:
