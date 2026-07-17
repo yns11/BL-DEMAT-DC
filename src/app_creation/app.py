@@ -58,43 +58,49 @@ donnees = st.session_state.donnees
 # ÉTAPE 1 — Informations du BL
 # =====================================================================
 if etape == 1:
-    operation = st.radio(
-        "Nature de l'opération *",
-        ["Nouvelle réception", "Archivage d'un ancien BL"],
-        index=1 if donnees.get("archivage") else 0,
+    libelles_op = list(repository.LIBELLES_OPERATION.values())
+    type_actuel = donnees.get("type_operation", repository.TYPE_RECEPTION)
+    choix_op = st.radio(
+        "Nature de l'opération *", libelles_op,
+        index=libelles_op.index(repository.LIBELLES_OPERATION[type_actuel]),
         horizontal=True,
     )
-    archivage = operation.startswith("Archivage")
+    type_op = next(t for t, l in repository.LIBELLES_OPERATION.items() if l == choix_op)
+    reception = type_op == repository.TYPE_RECEPTION
+    tiers = repository.libelle_tiers(type_op)  # « Client » pour une expédition
 
     numero = st.text_input("Numéro du BL *", value=donnees.get("numero", ""), max_chars=60)
-    date_reception = st.date_input("Date de réception *", value=donnees.get("date_reception", datetime.date.today()))
 
-    # Plage horaire de réception : uniquement pour une nouvelle réception
-    # (un archivage concerne un BL ancien, sans heure pertinente). Préremplie
-    # avec la plage contenant l'heure locale courante.
-    if archivage:
-        plage = None
-    else:
+    # Date et plage horaire : uniquement pour une nouvelle réception —
+    # expédition et archivage ne demandent que le numéro de BL et le tiers.
+    if reception:
+        date_reception = st.date_input("Date de réception *",
+                                       value=donnees.get("date_reception", datetime.date.today()))
         plage_defaut = (donnees["plage"] if donnees.get("plage") in repository.PLAGES_HORAIRES
                         else repository.plage_horaire_courante())
         plage = st.selectbox(
             "Plage horaire de réception *", options=repository.PLAGES_HORAIRES,
             index=repository.PLAGES_HORAIRES.index(plage_defaut),
         )
+    else:
+        date_reception = None
+        plage = None
+        st.caption(f"{choix_op} : seuls le numéro de BL et le {tiers.lower()} sont demandés.")
 
-    # --- Fournisseur : automatique via l'avis d'expédition (DESADV) quand le
-    # numéro de BL y figure ; sélection manuelle (filtre + liste) sinon. ---
+    # --- Fournisseur / client : automatique via l'avis d'expédition (DESADV)
+    # quand le numéro de BL y figure — quel que soit le type d'opération ;
+    # sélection manuelle (filtre + liste) sinon. ---
     frs_desadv = None
     if numero.strip():
         try:
             frs_desadv = repository.fournisseur_pour_bl(numero.strip())
         except Exception as e:
             st.warning(f"Consultation des avis d'expédition impossible : {e} — "
-                       "sélectionnez le fournisseur manuellement.")
+                       f"sélectionnez le {tiers.lower()} manuellement.")
 
     if frs_desadv:
         st.text_input(
-            "Fournisseur (avis d'expédition) ✓", value=frs_desadv, disabled=True,
+            f"{tiers} (avis d'expédition) ✓", value=frs_desadv, disabled=True,
             help="Renseigné automatiquement : ce numéro de BL figure dans un avis "
                  "d'expédition (DESADV).",
         )
@@ -102,25 +108,25 @@ if etape == 1:
     else:
         if numero.strip():
             st.caption("Ce BL est absent des avis d'expédition (DESADV) : "
-                       "sélectionnez le fournisseur manuellement.")
+                       f"sélectionnez le {tiers.lower()} manuellement.")
         try:
             tous_fournisseurs = repository.lister_fournisseurs()
         except Exception as e:
             tous_fournisseurs = []
-            st.error(f"Impossible de charger les fournisseurs : {e}")
+            st.error(f"Impossible de charger la liste : {e}")
 
         # Sur smartphone, la liste déroulante n'ouvre pas le clavier (Streamlit
         # désactive la saisie tactile dans st.selectbox) : le filtrage se fait
         # donc dans un champ texte dédié, qui restreint les options de la liste.
         filtre_frs = st.text_input(
-            "Filtrer les fournisseurs", value="",
+            "Filtrer la liste", value="",
             placeholder="Tapez quelques lettres pour filtrer la liste…",
         )
         if filtre_frs.strip():
             fournisseurs_affiches = [f for f in tous_fournisseurs
                                      if filtre_frs.strip().lower() in f.lower()]
             if not fournisseurs_affiches:
-                st.caption("Aucun fournisseur ne correspond à ce filtre.")
+                st.caption("Aucun résultat ne correspond à ce filtre.")
         else:
             fournisseurs_affiches = tous_fournisseurs
 
@@ -130,41 +136,42 @@ if etape == 1:
         elif len(fournisseurs_affiches) == 1:
             index_frs = 0                    # un seul résultat filtré : présélection
         fournisseur = st.selectbox(
-            "Fournisseur *", options=fournisseurs_affiches,
-            index=index_frs, placeholder="Choisir un fournisseur…",
+            f"{tiers} *", options=fournisseurs_affiches,
+            index=index_frs, placeholder="Choisir…",
         )
 
-    index_quai = (repository.QUAIS_RECEPTION.index(donnees["quai"])
-                  if donnees.get("quai") in repository.QUAIS_RECEPTION else None)
-    quai = st.selectbox(
-        "Quai de réception *", options=repository.QUAIS_RECEPTION,
-        index=index_quai, placeholder="Choisir le quai…",
-    )
-
-    if archivage:
-        st.radio("État de réception *", ["OK"], index=0, disabled=True, horizontal=True,
-                 help="Archivage : l'état est imposé à OK.")
-        statut = repository.STATUT_OK
-    else:
+    # Quai, état et commentaire : uniquement pour une nouvelle réception.
+    # Expédition/archivage : état imposé à OK, autres champs vides (NULL).
+    if reception:
+        index_quai = (repository.QUAIS_RECEPTION.index(donnees["quai"])
+                      if donnees.get("quai") in repository.QUAIS_RECEPTION else None)
+        quai = st.selectbox(
+            "Quai de réception *", options=repository.QUAIS_RECEPTION,
+            index=index_quai, placeholder="Choisir le quai…",
+        )
         choix = st.radio(
             "État de réception *", ["OK", "EDI NOK"],
             index=1 if donnees.get("statut") == repository.STATUT_EDI_NOK else 0, horizontal=True,
         )
         statut = repository.STATUT_OK if choix == "OK" else repository.STATUT_EDI_NOK
-
-    commentaire = st.text_area("Commentaire (facultatif)", value=donnees.get("commentaire", ""), max_chars=1000)
+        commentaire = st.text_area("Commentaire (facultatif)",
+                                   value=donnees.get("commentaire", ""), max_chars=1000)
+    else:
+        quai = None
+        statut = repository.STATUT_OK
+        commentaire = ""
 
     if st.button("Suivant ➡️", type="primary", use_container_width=True):
         if not numero.strip():
             st.error("Le numéro de BL est obligatoire.")
         elif not fournisseur:
-            st.error("Le fournisseur est obligatoire.")
-        elif not quai:
+            st.error(f"Le {tiers.lower()} est obligatoire.")
+        elif reception and not quai:
             st.error("Le quai de réception est obligatoire.")
         else:
             donnees.update({
                 "numero": numero.strip(), "date_reception": date_reception,
-                "plage": plage, "archivage": archivage, "fournisseur": fournisseur,
+                "plage": plage, "type_operation": type_op, "fournisseur": fournisseur,
                 "fournisseur_desadv": bool(frs_desadv), "quai": quai,
                 "statut": statut, "commentaire": commentaire.strip(),
             })
@@ -262,22 +269,33 @@ elif etape == 2:
 # =====================================================================
 elif etape == 3:
     st.subheader("Récapitulatif")
+    type_op = donnees.get("type_operation", repository.TYPE_RECEPTION)
+    reception = type_op == repository.TYPE_RECEPTION
     origine_frs = " (avis d'expédition)" if donnees.get("fournisseur_desadv") else ""
-    st.markdown(
-        f"""
-| | |
-|---|---|
-| **Opération** | {"Archivage" if donnees.get("archivage") else "Nouvelle réception"} |
-| **Numéro de BL** | {donnees.get("numero", "")} |
-| **Date de réception** | {donnees.get("date_reception", "")} |
-| **Plage horaire** | {donnees.get("plage") or "—"} |
-| **Fournisseur** | {donnees.get("fournisseur", "")}{origine_frs} |
-| **Quai de réception** | {donnees.get("quai", "")} |
-| **État de réception** | {ui.libelle_statut(donnees.get("statut", repository.STATUT_OK))} |
-| **Commentaire** | {donnees.get("commentaire") or "—"} |
-| **Pages** | {len(st.session_state.pages)} |
-"""
-    )
+
+    # Lignes du récapitulatif : expédition et archivage n'affichent que le
+    # numéro de BL et le tiers (les autres champs ne sont pas saisis).
+    lignes = [
+        ("Opération", repository.LIBELLES_OPERATION.get(type_op, type_op)),
+        ("Numéro de BL", donnees.get("numero", "")),
+    ]
+    if reception:
+        lignes += [
+            ("Date de réception", donnees.get("date_reception", "")),
+            ("Plage horaire", donnees.get("plage") or "—"),
+        ]
+    lignes.append((repository.libelle_tiers(type_op),
+                   f'{donnees.get("fournisseur", "")}{origine_frs}'))
+    if reception:
+        lignes += [
+            ("Quai de réception", donnees.get("quai", "")),
+            ("État de réception", ui.libelle_statut(donnees.get("statut", repository.STATUT_OK))),
+            ("Commentaire", donnees.get("commentaire") or "—"),
+        ]
+    lignes.append(("Pages", len(st.session_state.pages)))
+
+    st.markdown("| | |\n|---|---|\n"
+                + "\n".join(f"| **{label}** | {valeur} |" for label, valeur in lignes))
 
     if st.session_state.enregistrement_lance:
         # L'enregistrement s'exécute sur CE rerun : le clic a seulement posé un
@@ -292,14 +310,14 @@ elif etape == 3:
                     repository.inserer_bl(
                         id_bl=id_bl,
                         numero_bl=numero_final,
-                        date_reception=donnees["date_reception"],
-                        plage_horaire=donnees.get("plage"),
                         nom_fournisseur=donnees["fournisseur"],
-                        quai_reception=donnees["quai"],
                         statut_bl=donnees["statut"],
-                        comment_bl=donnees["commentaire"],
-                        operation_archivage=bool(donnees.get("archivage")),
+                        type_operation=donnees.get("type_operation", repository.TYPE_RECEPTION),
                         utilisateur=utilisateur,
+                        date_reception=donnees.get("date_reception"),
+                        quai_reception=donnees.get("quai"),
+                        comment_bl=donnees["commentaire"],
+                        plage_horaire=donnees.get("plage"),
                     )
                     st.session_state.numero_final = numero_final
                     st.session_state.bl_insere = True
