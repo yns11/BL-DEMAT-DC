@@ -8,7 +8,7 @@ env:
     valueFrom: volume
   # Configuration externalisée (CDC) : rien en dur dans le code.
   - name: BL_CATALOG
-    value: "poc_bl"
+    value: "emotors_data_champions"
   - name: BL_SCHEMA
     value: "projet_livraison"
   - name: BL_PAGE_SIZE
