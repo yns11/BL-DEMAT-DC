@@ -11,11 +11,24 @@ env:
     value: "emotors_data_champions"
   - name: BL_SCHEMA
     value: "projet_livraison"
-  - name: BL_MAX_IMAGE_BYTES
-    value: "2097152"
-  - name: BL_MAX_DIMENSION_PX
-    value: "3508"
-  # Fuseau du site : préremplissage de la plage horaire de réception
-  # (le conteneur tourne en UTC).
+  - name: BL_PAGE_SIZE
+    value: "25"
+  # Fuseau du site : filtres par défaut (veille/aujourd'hui) calculés en local.
   - name: BL_FUSEAU
     value: "Europe/Paris"
+  # Notification email quand un BL passe de EDI NOK à OK.
+  - name: BL_NOTIF_DESTINATAIRE
+    value: "younes.elhachi@gmail.com"
+  # Serveur SMTP à renseigner pour activer l'envoi (sinon : simple log).
+  # Le mot de passe DOIT venir d'un secret Databricks déclaré comme ressource
+  # d'app (valueFrom), jamais en clair ici.
+  # - name: BL_SMTP_HOST
+  #   value: "smtp.mon-entreprise.fr"
+  # - name: BL_SMTP_PORT
+  #   value: "587"
+  # - name: BL_SMTP_USER
+  #   value: "notifications@mon-entreprise.fr"
+  # - name: BL_SMTP_PASSWORD
+  #   valueFrom: smtp-password
+  # - name: BL_SMTP_EXPEDITEUR
+  #   value: "notifications@mon-entreprise.fr"
