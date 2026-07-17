@@ -15,7 +15,7 @@ variables:
       warehouse: "Serverless Starter Warehouse"
   catalog:
     description: Catalogue Unity Catalog
-    default: poc_bl
+    default: emotors_data_champions
   schema:
     description: Schéma Unity Catalog
     default: projet_livraison
