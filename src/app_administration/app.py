@@ -99,10 +99,15 @@ utilisateur = get_current_user()
 for _, bl in df_bl.iterrows():
     id_bl = bl["id_bl"]
     chemins = photos_par_bl.get(id_bl, [])
+    type_op_bl = bl.get("type_operation") or repository.TYPE_RECEPTION
+    reception_bl = type_op_bl == repository.TYPE_RECEPTION
+    tiers_bl = repository.libelle_tiers(type_op_bl)
+
     marqueur = " · 🗑️ SUPPRIMÉ" if bl.get("est_supprime") else ""
+    marqueur_op = "" if reception_bl else f" · {repository.LIBELLES_OPERATION.get(type_op_bl, type_op_bl)}"
     quai_titre = f" — quai {bl['quai_reception']}" if bl.get("quai_reception") else ""
     titre = (f"📄 BL n° {bl['numero_bl']} — {bl['nom_fournisseur']}{quai_titre} — "
-             f"{ui.libelle_statut(bl['statut_bl'])} ({len(chemins)} page(s)){marqueur}")
+             f"{ui.libelle_statut(bl['statut_bl'])} ({len(chemins)} page(s)){marqueur_op}{marqueur}")
 
     with st.expander(titre):
         col_donnees, col_images = st.columns([1, 1])
@@ -111,44 +116,54 @@ for _, bl in df_bl.iterrows():
         with col_donnees:
             with st.form(key=f"form_{id_bl}"):
                 nouveau_numero = st.text_input("Numéro de BL", value=bl["numero_bl"], max_chars=60)
-                nouvelle_date = st.date_input("Date de réception", value=bl["date_reception"])
-                index_plage = (repository.PLAGES_HORAIRES.index(bl["plage_horaire"])
-                               if bl.get("plage_horaire") in repository.PLAGES_HORAIRES else None)
-                nouvelle_plage = st.selectbox("Plage horaire de réception",
-                                              options=repository.PLAGES_HORAIRES, index=index_plage,
-                                              placeholder="Non renseignée (archivage ou BL antérieur)")
                 index_frs = (tous_fournisseurs.index(bl["nom_fournisseur"])
                              if bl["nom_fournisseur"] in tous_fournisseurs else None)
-                nouveau_frs = st.selectbox("Fournisseur", options=tous_fournisseurs, index=index_frs,
+                nouveau_frs = st.selectbox(tiers_bl, options=tous_fournisseurs, index=index_frs,
                                            placeholder="Choisir…")
-                index_quai = (repository.QUAIS_RECEPTION.index(bl["quai_reception"])
-                              if bl.get("quai_reception") in repository.QUAIS_RECEPTION else None)
-                nouveau_quai = st.selectbox("Quai de réception", options=repository.QUAIS_RECEPTION,
-                                            index=index_quai, placeholder="Non renseigné (BL antérieur)")
-                nouveau_statut = st.radio(
-                    "État de réception", ["OK", "EDI NOK"], horizontal=True,
-                    index=0 if bl["statut_bl"] == repository.STATUT_OK else 1,
-                )
-                nouveau_commentaire = st.text_area("Commentaire", value=bl["comment_bl"] or "", max_chars=1000)
+
+                # Date, plage, quai, état et commentaire : pertinents pour une
+                # nouvelle réception uniquement (non saisis en expédition/archivage).
+                if reception_bl:
+                    nouvelle_date = st.date_input("Date de réception", value=bl["date_reception"])
+                    index_plage = (repository.PLAGES_HORAIRES.index(bl["plage_horaire"])
+                                   if bl.get("plage_horaire") in repository.PLAGES_HORAIRES else None)
+                    nouvelle_plage = st.selectbox("Plage horaire de réception",
+                                                  options=repository.PLAGES_HORAIRES, index=index_plage,
+                                                  placeholder="Non renseignée (BL antérieur)")
+                    index_quai = (repository.QUAIS_RECEPTION.index(bl["quai_reception"])
+                                  if bl.get("quai_reception") in repository.QUAIS_RECEPTION else None)
+                    nouveau_quai = st.selectbox("Quai de réception", options=repository.QUAIS_RECEPTION,
+                                                index=index_quai, placeholder="Non renseigné (BL antérieur)")
+                    nouveau_statut = st.radio(
+                        "État de réception", ["OK", "EDI NOK"], horizontal=True,
+                        index=0 if bl["statut_bl"] == repository.STATUT_OK else 1,
+                    )
+                    nouveau_commentaire = st.text_area("Commentaire", value=bl["comment_bl"] or "", max_chars=1000)
+                else:
+                    nouvelle_date = nouvelle_plage = nouveau_quai = None
+                    nouveau_statut = None
+                    nouveau_commentaire = None
 
                 if st.form_submit_button("💾 Enregistrer les modifications", type="primary",
                                          use_container_width=True):
                     try:
                         champs = {
                             "numero_bl": nouveau_numero.strip(),
-                            "date_reception": nouvelle_date,
                             "nom_fournisseur": nouveau_frs,
-                            "statut_bl": repository.STATUT_OK if nouveau_statut == "OK"
-                                         else repository.STATUT_EDI_NOK,
-                            "comment_bl": nouveau_commentaire.strip(),
                         }
-                        if nouveau_quai:  # BL antérieurs : quai absent tant que non choisi
-                            champs["quai_reception"] = nouveau_quai
-                        if nouvelle_plage:
-                            champs["plage_horaire"] = nouvelle_plage
+                        if reception_bl:
+                            champs["date_reception"] = nouvelle_date
+                            champs["statut_bl"] = (repository.STATUT_OK if nouveau_statut == "OK"
+                                                   else repository.STATUT_EDI_NOK)
+                            champs["comment_bl"] = nouveau_commentaire.strip()
+                            if nouveau_quai:  # BL antérieurs : quai absent tant que non choisi
+                                champs["quai_reception"] = nouveau_quai
+                            if nouvelle_plage:
+                                champs["plage_horaire"] = nouvelle_plage
                         # Transition EDI NOK -> OK : à notifier par email (après
                         # l'UPDATE, pour ne jamais bloquer la mise à jour).
-                        passe_a_ok = (bl["statut_bl"] == repository.STATUT_EDI_NOK
+                        passe_a_ok = (reception_bl
+                                      and bl["statut_bl"] == repository.STATUT_EDI_NOK
                                       and champs["statut_bl"] == repository.STATUT_OK)
                         repository.mettre_a_jour_bl(id_bl, champs, utilisateur)
                         if passe_a_ok:
@@ -175,7 +190,7 @@ for _, bl in df_bl.iterrows():
             # ----- Traçabilité -----
             st.caption(
                 f"Créé par **{bl['saisie_par'] or '?'}** le {bl['saisie_le'] or '?'} · "
-                f"Opération : {'Archivage' if bl.get('operation_type') else 'Nouvelle réception'}"
+                f"Opération : {repository.LIBELLES_OPERATION.get(type_op_bl, type_op_bl)}"
                 + (f" · Modifié par **{bl['modifie_par']}** le {bl['modifie_le']}" if bl["modifie_par"] else "")
             )
 
