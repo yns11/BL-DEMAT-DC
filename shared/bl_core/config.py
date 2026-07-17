@@ -33,7 +33,7 @@ class Settings:
 
 
 def get_settings() -> Settings:
-    catalog = os.environ.get("BL_CATALOG", "poc_bl")
+    catalog = os.environ.get("BL_CATALOG", "emotors_data_champions")
     schema = os.environ.get("BL_SCHEMA", "projet_livraison")
     return Settings(
         catalog=catalog,
