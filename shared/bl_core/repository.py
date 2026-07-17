@@ -27,6 +27,23 @@ logger = logging.getLogger("bl.repository")
 STATUT_OK = "1"
 STATUT_EDI_NOK = "0"
 
+# Types d'opération. Le tiers saisi (colonne nom_fournisseur) est un
+# fournisseur pour une réception/un archivage, un CLIENT pour une expédition —
+# même colonne en base, seul le libellé à l'écran change.
+TYPE_RECEPTION = "RECEPTION"
+TYPE_EXPEDITION = "EXPEDITION"
+TYPE_ARCHIVAGE = "ARCHIVAGE"
+LIBELLES_OPERATION = {
+    TYPE_RECEPTION: "Nouvelle réception",
+    TYPE_EXPEDITION: "Expédition",
+    TYPE_ARCHIVAGE: "Archivage d'un ancien BL",
+}
+
+
+def libelle_tiers(type_operation: str) -> str:
+    """« Client » pour une expédition, « Fournisseur » sinon."""
+    return "Client" if type_operation == TYPE_EXPEDITION else "Fournisseur"
+
 # Quais de réception du site (valeur obligatoire à la création d'un BL).
 QUAIS_RECEPTION = ["B15", "B06EST", "B06NORD", "B02NORD", "AUTRE"]
 
@@ -163,21 +180,23 @@ def bl_existe(id_bl: str) -> bool:
 def inserer_bl(
     id_bl: str,
     numero_bl: str,
-    date_reception: datetime.date,
     nom_fournisseur: str,
-    quai_reception: str,
     statut_bl: str,
-    comment_bl: str,
-    operation_archivage: bool,
+    type_operation: str,
     utilisateur: str,
+    date_reception: Optional[datetime.date] = None,
+    quai_reception: Optional[str] = None,
+    comment_bl: str = "",
     plage_horaire: Optional[str] = None,
 ) -> None:
+    """Date, plage, quai et commentaire ne concernent qu'une nouvelle
+    réception : NULL pour une expédition ou un archivage."""
     s = get_settings()
     _run(
         f"""
         INSERT INTO {s.table_suivi}
           (id_bl, numero_bl, date_reception, plage_horaire, nom_fournisseur, quai_reception,
-           statut_bl, comment_bl, saisie_par, saisie_le, operation_type, est_supprime)
+           statut_bl, comment_bl, saisie_par, saisie_le, type_operation, est_supprime)
         VALUES
           (%(id)s, %(num)s, %(dr)s, %(plage)s, %(frs)s, %(quai)s,
            %(st)s, %(com)s, %(par)s, current_timestamp(), %(op)s, false)
@@ -192,7 +211,7 @@ def inserer_bl(
             "st": statut_bl,
             "com": comment_bl,
             "par": utilisateur,
-            "op": operation_archivage,
+            "op": type_operation,
         },
     )
 
@@ -279,7 +298,7 @@ def rechercher_bl(
         f"""
         SELECT id_bl, numero_bl, date_reception, plage_horaire, nom_fournisseur, quai_reception,
                statut_bl, comment_bl, saisie_par, saisie_le, modifie_par, modifie_le,
-               operation_type, est_supprime
+               type_operation, est_supprime
         FROM {s.table_suivi}
         WHERE {where}
         ORDER BY saisie_le DESC
