@@ -94,23 +94,39 @@ def _etat_connexion() -> dict:
     return {"conn": None, "creee_a": 0.0}
 
 
-def _nouvelle_connexion():
-    endpoint = os.environ.get("LAKEBASE_ENDPOINT", "")
-    if not endpoint:
-        raise RuntimeError(
-            "LAKEBASE_ENDPOINT absent : vérifiez que la ressource d'app « postgres » "
-            "(base Lakebase) est bien attachée à l'application."
-        )
+def _jeton_acces() -> str:
+    """Mot de passe Postgres = jeton OAuth Databricks du service principal.
+
+    Voie principale : le jeton OAuth de l'app (DATABRICKS_CLIENT_ID/SECRET,
+    injectés par la plateforme) — Lakebase l'accepte directement comme mot de
+    passe, sans configuration supplémentaire. Si le workspace injecte aussi
+    LAKEBASE_ENDPOINT, on utilise de préférence le jeton dédié généré pour cet
+    endpoint (portée plus étroite)."""
     # Import local : le SDK n'est nécessaire que pour générer le jeton.
     from databricks.sdk import WorkspaceClient
 
-    token = WorkspaceClient().postgres.generate_database_credential(endpoint=endpoint).token
+    w = WorkspaceClient()
+    endpoint = os.environ.get("LAKEBASE_ENDPOINT", "")
+    if endpoint:
+        try:
+            return w.postgres.generate_database_credential(endpoint=endpoint).token
+        except Exception as e:
+            logger.warning("generate_database_credential en échec (%s) : repli sur le jeton OAuth.", e)
+    return w.config.oauth_token().access_token
+
+
+def _nouvelle_connexion():
+    if not os.environ.get("PGHOST"):
+        raise RuntimeError(
+            "PGHOST absent : vérifiez que la ressource d'app « postgres » "
+            "(base Lakebase) est bien attachée à l'application, puis redéployez-la."
+        )
     return psycopg.connect(
         host=os.environ["PGHOST"],
         port=int(os.environ.get("PGPORT", "5432")),
         dbname=os.environ["PGDATABASE"],
         user=os.environ["PGUSER"],
-        password=token,
+        password=_jeton_acces(),
         sslmode="require",
     )
 
