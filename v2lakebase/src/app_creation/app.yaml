@@ -1,0 +1,17 @@
+command: ["streamlit", "run", "app.py"]
+
+# V2 Lakebase : PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE et
+# LAKEBASE_ENDPOINT sont injectées AUTOMATIQUEMENT par la ressource d'app
+# « postgres » (base Lakebase) — rien à déclarer ici pour la connexion.
+env:
+  # Configuration externalisée (CDC) : rien en dur dans le code.
+  - name: BL_PG_SCHEMA
+    value: "bl_demat"
+  - name: BL_MAX_IMAGE_BYTES
+    value: "2097152"
+  - name: BL_MAX_DIMENSION_PX
+    value: "3508"
+  # Fuseau du site : préremplissage de la plage horaire de réception
+  # (le conteneur tourne en UTC).
+  - name: BL_FUSEAU
+    value: "Europe/Paris"

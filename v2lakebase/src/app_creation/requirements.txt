@@ -1,0 +1,13 @@
+# Versions épinglées (CDC) : une montée de version ne peut pas casser l'app.
+# streamlit 1.38.0 = version préinstallée du runtime Databricks Apps (install rapide).
+streamlit==1.38.0
+# >= 0.81.0 requis : module w.postgres (génération du jeton Lakebase).
+databricks-sdk==0.81.0
+# Client Postgres (Lakebase) — wheel binaire, pas de compilation au déploiement.
+psycopg[binary]==3.2.3
+pandas==2.2.3
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+# Décodage des photos HEIC/HEIF (format par défaut iPhone / Android récents).
+pillow==10.4.0
+pillow-heif==0.18.0

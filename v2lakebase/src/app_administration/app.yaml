@@ -1,0 +1,30 @@
+command: ["streamlit", "run", "app.py"]
+
+# V2 Lakebase : PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE et
+# LAKEBASE_ENDPOINT sont injectées AUTOMATIQUEMENT par la ressource d'app
+# « postgres » (base Lakebase) — rien à déclarer ici pour la connexion.
+env:
+  # Configuration externalisée (CDC) : rien en dur dans le code.
+  - name: BL_PG_SCHEMA
+    value: "bl_demat"
+  - name: BL_PAGE_SIZE
+    value: "25"
+  # Fuseau du site : filtres par défaut (veille/aujourd'hui) calculés en local.
+  - name: BL_FUSEAU
+    value: "Europe/Paris"
+  # Notification email quand un BL passe de EDI NOK à OK.
+  - name: BL_NOTIF_DESTINATAIRE
+    value: "younes.elhachi@gmail.com"
+  # Serveur SMTP à renseigner pour activer l'envoi (sinon : simple log).
+  # Le mot de passe DOIT venir d'un secret Databricks déclaré comme ressource
+  # d'app (valueFrom), jamais en clair ici.
+  # - name: BL_SMTP_HOST
+  #   value: "smtp.mon-entreprise.fr"
+  # - name: BL_SMTP_PORT
+  #   value: "587"
+  # - name: BL_SMTP_USER
+  #   value: "notifications@mon-entreprise.fr"
+  # - name: BL_SMTP_PASSWORD
+  #   valueFrom: smtp-password
+  # - name: BL_SMTP_EXPEDITEUR
+  #   value: "notifications@mon-entreprise.fr"
