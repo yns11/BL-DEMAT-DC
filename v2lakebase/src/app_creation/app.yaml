@@ -1,8 +1,9 @@
 command: ["streamlit", "run", "app.py"]
 
-# V2 Lakebase : PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE et
-# LAKEBASE_ENDPOINT sont injectées AUTOMATIQUEMENT par la ressource d'app
-# « postgres » (base Lakebase) — rien à déclarer ici pour la connexion.
+# V2 Lakebase : PGHOST, PGPORT, PGDATABASE, PGUSER et PGSSLMODE sont
+# injectées AUTOMATIQUEMENT par la ressource d'app « postgres » (base
+# Lakebase) — rien à déclarer ici pour la connexion. Le mot de passe est
+# le jeton OAuth du service principal, généré par le code au démarrage.
 env:
   # Configuration externalisée (CDC) : rien en dur dans le code.
   - name: BL_PG_SCHEMA
